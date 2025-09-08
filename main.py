@@ -1,5 +1,2 @@
-x = 5
+print("Hello Quis")
 
-print("Hello world")
-
-print(x)
