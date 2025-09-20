@@ -5,17 +5,12 @@ from grove.gpio import GPIO
 from grove.adc import ADC
 from grove.grove_ultrasonic_ranger import GroveUltrasonicRanger
 
-# --- Cấu hình cảm biến ---
-# Nhiệt độ & độ ẩm
-dht = DHT("11", 5)   # DHT11 cắm vào D5 (GPIO5)
-
-# Cảm biến ánh sáng, biến trở: dùng ADC
+# --- Setup ---
 adc = ADC()
-light_channel = 0     # A0
-rotary_channel = 2    # A2
-
-# Cảm biến siêu âm
-ultrasonic = GroveUltrasonicRanger(16)   # D16
+dht = DHT("11", 5)   # DHT11 in D5
+light_channel = 0     # Light A0
+rotary_channel = 2    # Bien tro A2
+ultrasonic = GroveUltrasonicRanger(16)   # Sieu am D16
 
 # --- LCD ---
 lcd = JHD1802()
@@ -25,22 +20,20 @@ led_red = GPIO(26, GPIO.OUT)    # D17
 led_yellow = GPIO(24, GPIO.OUT) # D18
 led_blue = GPIO(22, GPIO.OUT)   # D19
 
-# --- Biến trạng thái LED ---
 state_red = 0
 state_yellow = 0
 state_blue = 0
 
+# Hien thi cac thong so ra lcd
 def display_main(temp, hum, light, rotary_v, distance):
-    """Hiển thị màn hình chính"""
     lcd.setCursor(0, 0)
     lcd.write("T:{:d} H:{:d} D:{:.1f}".format(temp, hum, distance))
     lcd.setCursor(1, 0)
     lcd.write("L:{:d} V:{:.1f}".format(light, rotary_v))
-    # khoảng cách thay cho light nếu cần
     print(f"Temp={temp:.1f}C  Hum={hum:.1f}%  Light={light:.0f}  Rotary={rotary_v:.2f}V  Dist={distance:.1f}cm")
 
+# Hien thi khi bat tat led
 def display_led_status(name, value, status):
-    """Hiển thị trạng thái LED khi thay đổi"""
     msg = f"{name}:{'ON' if status else 'OFF'} Val={value:.2f}"
     print(msg)
     lcd.clear()
@@ -48,13 +41,13 @@ def display_led_status(name, value, status):
     lcd.write(f"{name}:{'ON' if status else 'OFF'}")
     lcd.setCursor(1, 0)
     lcd.write(f"Val={value:.2f}")
-    time.sleep(3)  # hiển thị 3s
+    time.sleep(3) 
     lcd.clear()
 
+# Tinh gai tri dien ap 
 def read_rotary_voltage(channel):
-    """Đổi giá trị ADC thành điện áp (giả sử Vcc=3.3V, 12bit ADC)"""
     raw = adc.read(channel)
-    return raw / 1023*3.3
+    return raw / 1023*3.3  # ADC 10bit
 
 try:
     while True:
@@ -63,7 +56,7 @@ try:
         rotary_v = read_rotary_voltage(rotary_channel)
         distance = ultrasonic.get_distance()
         # --- Kiểm tra LED ---
-        #  LED đỏ
+        #  LED red
         if temp > 40 and state_red == 0:
             led_red.write(1)
             state_red = 1
@@ -73,7 +66,7 @@ try:
             state_red = 0
             display_led_status("RED", temp, 0)
 
-        # LED vàng
+        # LED yellow
         if hum > 70 and state_yellow == 0:
             led_yellow.write(1)
             state_yellow = 1
@@ -84,7 +77,7 @@ try:
             state_yellow = 0
             display_led_status("YELLOW", hum, 0)
 
-        # LED xanh
+        # LED blue
         if rotary_v > 2.0 and state_blue == 0:
             led_blue.write(1)
             state_blue = 1
@@ -94,7 +87,7 @@ try:
             state_blue = 0
             display_led_status("BLUE", rotary_v, 0)
 
-        # --- Hiển thị màn hình chính ---
+        # --- In ra man hinh ---
         lcd.clear()
         display_main(temp, hum, light, rotary_v, distance)
 
