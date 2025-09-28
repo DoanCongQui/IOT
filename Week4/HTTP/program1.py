@@ -1,47 +1,100 @@
-import requests
 import time
 import random
+import threading
+import requests
+import paho.mqtt.client as mqtt
+from grove.adc import ADC
+from seeed_dht import DHT
 
-# API key của ThingSpeak (Write API Key)
-WRITE_API_KEY = "8TCXXRHS2MI50OIM"
-URL = "https://api.thingspeak.com/update"
+# ==== CONFIG THINGSPEAK ====
+CHANNEL_ID = "YOUR_CHANNEL_ID"
+HTTP_API_KEY = "YOUR_HTTP_WRITE_API_KEY"   # Write API Key HTTP
 
-# Bộ nhớ tạm để lưu dữ liệu trong 20 giây
-temps, hums, volts = [], [], []
+# URL cho HTTP
+HTTP_URL = f"https://api.thingspeak.com/update?api_key={HTTP_API_KEY}"
 
-start_time = time.time()
-duration = 45 * 60  # chạy ít nhất 45 phút
+# Config cho MQTT
+MQTT_BROKER = "mqtt3.thingspeak.com"
+MQTT_PORT = 1883
+MQTT_CLIENT_ID = "YOUR_MQTT_CLIENT_ID"
+MQTT_USERNAME = MQTT_CLIENT_ID
+MQTT_PASSWORD = "YOUR_MQTT_PASSWORD"
+MQTT_TOPIC = f"channels/{CHANNEL_ID}/publish"
 
-while time.time() - start_time < duration:
-    # Sinh dữ liệu random
-    temp = random.uniform(20, 50)   # Nhiệt độ 20-50
-    hum = random.uniform(20, 90)    # Độ ẩm 20-90
-    volt = random.uniform(0, 3.3)   # Điện áp 0-3.3V
+# Tao bien luu du lieu
+avg_temp, avg_hum, avg_volt = 0, 0, 0
+lock = threading.Lock()
 
-    # Lọc dữ liệu lỗi (giả sử <0 hoặc quá lớn là lỗi)
-    if 0 <= temp <= 100 and 0 <= hum <= 100 and 0 <= volt <= 3.3:
-        temps.append(temp)
-        hums.append(hum)
-        volts.append(volt)
+adc = ADC()
+dht = DHT("22", 5)  
+rotary_channel = 0  
 
-    # Nếu đủ 20 giây thì tính trung bình và gửi
-    if len(temps) >= 20:
-        avg_temp = sum(temps) / len(temps)
-        avg_hum = sum(hums) / len(hums)
-        avg_volt = sum(volts) / len(volts)
+# Func doc bien tro votl
+def read_rotary_voltage(channel):
+    raw = adc.read(channel)  # 10-bit
+    return raw / 1023 * 3.3
 
-        # Gửi dữ liệu qua HTTP
-        payload = {
-            "api_key": WRITE_API_KEY,
-            "field1": avg_temp,
-            "field2": avg_hum,
-            "field3": avg_volt
-        }
-        r = requests.post(URL, params=payload)
-        print(f"📤 Gửi: Temp={avg_temp:.2f}, Hum={avg_hum:.2f}, Volt={avg_volt:.2f}, Status={r.status_code}")
+# Func doc cam bien return data sensor
+def read_sensors():
+    hum, temp = dht.read()
+    volt = read_rotary_voltage(rotary_channel)
+    return temp, hum, volt
 
-        # Reset mảng
+def collect_data():
+    global avg_temp, avg_hum, avg_volt
+    while True:
         temps, hums, volts = [], [], []
+        for _ in range(20):
+            t, h, v = read_sensors()
+            if 10 < t < 70:
+                temps.append(t)
+            if 20 < h < 100:
+                hums.append(h)
+            if 0 < v < 3.3:
+                volts.append(v)
+            time.sleep(1)
 
-    time.sleep(1)
+        with lock:
+            avg_temp = sum(temps) / len(temps) if temps else 0
+            avg_hum = sum(hums) / len(hums) if hums else 0
+            avg_volt = sum(volts) / len(volts) if volts else 0
+
+
+def send_http_and_mqtt():
+    """Gửi HTTP tại giây 20 và MQTT tại giây 22"""
+    client = mqtt.Client(client_id=MQTT_CLIENT_ID, protocol=mqtt.MQTTv311)
+    client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+    client.connect(MQTT_BROKER, MQTT_PORT, 60)
+
+    while True:
+        time.sleep(20)  
+        with lock:
+            payload_http = {
+                "field1": avg_temp,
+                "field2": avg_hum
+            }
+        try:
+            r = requests.post(HTTP_URL, data=payload_http, timeout=5)
+            print(f"HTTP Sent -> Temp={avg_temp:.2f}, Hum={avg_hum:.2f}")
+        except Exception as e:
+            print("[HTTP] Error:", e)
+
+        time.sleep(2) # Delay 2s
+        with lock:
+            msg = f"field3={avg_volt}"
+        try:
+            client.publish(MQTT_TOPIC, msg)
+            print(f"QTT Sent -> Volt={avg_volt:.2f}")
+        except Exception as e:
+            print("[MQTT] Error:", e)
+
+
+if __name__ == "__main__":
+    # Create thread 
+    t1 = threading.Thread(target=collect_data, daemon=True)
+    t2 = threading.Thread(target=send_http_and_mqtt, daemon=True)
+
+    # Start thread
+    t1.start()
+    t2.start()
 
